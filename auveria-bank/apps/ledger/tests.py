@@ -204,3 +204,17 @@ class SeedDemoTests(TestCase):
         self.assertTrue(run_reconciliation().ok)
         first = Account.objects.filter(is_system=False).order_by("id").first()
         self.assertEqual(first.balance_kobo, 15_000_000 - 2_500_000 - 750_000 - 120_000)
+
+    def test_seed_demo_reuses_a_customer_registered_under_another_phone(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        from apps.kyc.services import register_customer
+
+        # Someone already signed up with the first demo identity, using a different phone number.
+        register_customer(bvn="22211111111", nin="22219999999", phone="08099999999", password="Str0ng-Passw0rd!")
+        with override_settings(DEBUG=True):
+            call_command("seed_demo", stdout=StringIO())  # must not crash on "identity already registered"
+        self.assertEqual(Account.objects.filter(is_system=False).count(), 2)

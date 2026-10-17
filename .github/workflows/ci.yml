@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch cancels the older, now-pointless run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (Python ${{ matrix.python }}, PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+
+    # A real PostgreSQL, so the row-locking and concurrency tests actually run.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: auveria
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_NAME: auveria
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: localhost
+      DB_PORT: "5432"
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: auveria-bank
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: auveria-bank/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Django system check
+        run: python manage.py check
+
+      - name: Migrations are up to date
+        # Fails if a model changed but its migration wasn't committed.
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations
+        run: python manage.py migrate
+
+      - name: Run the test suite
+        # The concurrency tests skip themselves without PostgreSQL. In CI a skip
+        # would hide exactly the tests we care about, so any skip fails the job.
+        run: |
+          python manage.py test --verbosity 2 2>&1 | tee test.log
+          if grep -q "skipped" test.log; then
+            echo "::error::Some tests were skipped. The concurrency tests must run on PostgreSQL."
+            exit 1
+          fi
+
+      - name: Smoke test with demo data and reconcile
+        run: |
+          python manage.py seed_demo
+          python manage.py reconcile
+
+  frontend:
+    name: Frontend (type-check and build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: auveria-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: auveria-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build

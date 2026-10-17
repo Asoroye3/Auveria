@@ -26,13 +26,18 @@ def get_tier(code: int) -> Tier:
     return tier
 
 
-def _normalise(name: str) -> list:
+def _normalize(name: str) -> list:
     return sorted(name.lower().split())
 
 
 def _identity_hash(bvn: str, nin: str) -> str:
     msg = f"{bvn}:{nin}".encode()
     return hmac.new(settings.SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def find_customer_by_identity(bvn: str, nin: str):
+    """The customer already registered with this BVN + NIN, if any (matched by keyed hash)."""
+    return Customer.objects.filter(identity_hash=_identity_hash(bvn, nin)).first()
 
 
 @transaction.atomic
@@ -49,7 +54,7 @@ def onboard_customer(*, bvn: str, nin: str, phone: str, provider=None) -> Custom
         raise OnboardingError("BVN not found")
     if nin_rec is None:
         raise OnboardingError("NIN not found")
-    if _normalise(bvn_rec.full_name) != _normalise(nin_rec.full_name) or (
+    if _normalize(bvn_rec.full_name) != _normalize(nin_rec.full_name) or (
         bvn_rec.date_of_birth != nin_rec.date_of_birth
     ):
         raise OnboardingError("BVN and NIN records do not belong to the same person")

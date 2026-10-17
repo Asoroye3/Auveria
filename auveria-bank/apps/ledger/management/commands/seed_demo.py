@@ -2,12 +2,11 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.accounts.models import Account
 from apps.accounts.services import open_account
-from apps.kyc.services import OnboardingError, register_customer, set_pin
+from apps.kyc.services import OnboardingError, find_customer_by_identity, register_customer, set_pin
 from apps.ledger.services import AccountNotActive, InsufficientFunds, LimitExceeded, deposit, transfer
 
-PASSWORD = "Demo-Passw0rd!"
+PASSWORD = "Demo-Password!"
 PIN = "2580"
 # (BVN, NIN, phone). The mock identity provider treats a BVN and NIN that share
 # their first four digits as the same person.
@@ -26,19 +25,27 @@ class Command(BaseCommand):
 
         User = get_user_model()
         accounts = []
+        logins = []
         for bvn, nin, phone in PEOPLE:
-            if not User.objects.filter(username=phone).exists():
+            # A customer registered earlier (even under a different phone number) is reused as is.
+            customer = find_customer_by_identity(bvn, nin)
+            if customer is None:
+                if User.objects.filter(username=phone).exists():
+                    raise CommandError(
+                        f"The phone number {phone} already belongs to a different customer. "
+                        "Remove that user in the admin, or run this on a fresh database."
+                    )
                 try:
                     customer = register_customer(bvn=bvn, nin=nin, phone=phone, password=PASSWORD)
                 except OnboardingError as exc:
                     raise CommandError(f"Could not create {phone}: {exc}")
-                open_account(customer)
                 set_pin(customer, PIN)
                 self.stdout.write(f"Created customer {customer.full_name} ({phone})")
-            account = Account.objects.filter(customer__user__username=phone).first()
-            if account is None:
-                raise CommandError(f"{phone} exists but has no account")
+            else:
+                self.stdout.write(f"Using existing customer {customer.full_name}")
+            account = customer.accounts.order_by("id").first() or open_account(customer)
             accounts.append(account)
+            logins.append(customer.user.username if customer.user else phone)
 
         first, second = accounts
         # Fixed idempotency keys make this safe to run again: nothing is duplicated.
@@ -53,6 +60,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"Skipped demo transfer {i}: {exc}")
 
         self.stdout.write(self.style.SUCCESS("Demo data ready."))
-        self.stdout.write(f"Demo logins (phone / password / PIN): {PEOPLE[0][2]} and {PEOPLE[1][2]} / {PASSWORD} / {PIN}")
+        self.stdout.write(f"Demo logins: {logins[0]} and {logins[1]}")
+        self.stdout.write(f"Customers created by this command use password {PASSWORD} and PIN {PIN}.")
         self.stdout.write("Customers that already existed keep their own passwords and PINs.")
         self.stdout.write("For the teller desk, create a staff login: python manage.py createsuperuser")
