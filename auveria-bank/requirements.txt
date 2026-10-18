@@ -1,5 +1,5 @@
 Django>=5.2,<5.3
-djangorestframework>=3.16
+djangorestframework>=3.18.3
 django-cors-headers>=4.4
 whitenoise>=6.7
 psycopg[binary]>=3.2
