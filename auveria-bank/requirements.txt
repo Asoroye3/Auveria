@@ -1,4 +1,4 @@
-Django>=5.2,<5.3
+Django>=6.1.2,<6.2
 djangorestframework>=3.16
 django-cors-headers>=4.4
 whitenoise>=6.7
