@@ -2,6 +2,10 @@ import type { Account, CashJournal, LedgerRow, Me, Page, StaffAccount, TransferR
 
 const TOKEN_KEY = "auveria.token";
 
+// Empty in development (Vite proxies /api to Django). On Vercel, set VITE_API_BASE
+// to the backend's address, for example https://auveria-bank.vercel.app
+const API_BASE: string = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
+
 export const tokenStore = {
   get: (): string | null => localStorage.getItem(TOKEN_KEY),
   set: (token: string): void => localStorage.setItem(TOKEN_KEY, token),
@@ -67,7 +71,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let res: Response;
   try {
-    res = await fetch(`/api/v1${path}`, {
+    res = await fetch(`${API_BASE}/api/v1${path}`, {
       method: options.method ?? "GET",
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -125,7 +129,7 @@ export const api = {
     request<{ detail: string }>("/pin/", { method: "POST", body }),
 
   requestOtp: (body: OtpRequestBody) =>
-    request<{ detail: string; sent_to: string; expires_in_seconds: number }>("/otp/request/", {
+    request<{ detail: string; sent_to: string; expires_in_seconds: number; demo_code?: string }>("/otp/request/", {
       method: "POST",
       body,
     }),
